@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { width: 350px; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; background: #f4f6f9; color: #222; }
+        .header { background: #1a1a2e; color: white; padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { margin: 0; font-size: 15px; }
+        .header p { margin: 2px 0 0 0; font-size: 10px; color: #a0a0bd; }
+        .nav-tabs { display: flex; background: #16213e; }
+        .nav-tabs button { flex: 1; background: none; border: none; color: #ccc; padding: 8px; font-size: 11px; cursor: pointer; border-bottom: 2px solid transparent; }
+        .nav-tabs button.active { color: #fff; border-bottom: 2px solid #4361ee; font-weight: bold; }
+        .container { padding: 12px; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+        .url-box { background: #fff; border: 1px solid #dcdfe6; border-radius: 5px; padding: 7px 10px; font-size: 11px; color: #444; word-break: break-all; margin-bottom: 10px; }
+        .btn-row { display: flex; gap: 6px; margin-bottom: 12px; }
+        .btn-primary { flex: 2; padding: 9px; background: #4361ee; color: white; border: none; border-radius: 5px; font-weight: bold; font-size: 12px; cursor: pointer; }
+        .btn-secondary { flex: 1; padding: 9px; background: #e2e8f0; color: #334155; border: none; border-radius: 5px; font-weight: 600; font-size: 11px; cursor: pointer; }
+        .card { background: #fff; border-radius: 7px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 10px; }
+        .alert-banner { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 10px; }
+        .danger-text { color: #d32f2f; font-weight: 800; font-size: 15px; }
+        .medium-text { color: #ed6c02; font-weight: 800; font-size: 15px; }
+        .safe-text { color: #2e7d32; font-weight: 800; font-size: 15px; }
+        .score-badge { padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 13px; }
+        .badge-danger { background: #ffebee; color: #d32f2f; }
+        .badge-medium { background: #fff3e0; color: #ed6c02; }
+        .badge-safe { background: #e8f5e9; color: #2e7d32; }
+        .section-title { font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase; margin: 8px 0 6px 0; }
+        .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .feature-box { border: 1px solid #e2e8f0; border-radius: 5px; padding: 6px 8px; font-size: 10px; }
+        .feature-box span { display: block; font-size: 12px; font-weight: bold; margin-top: 2px; }
+        .kw-item { display: flex; justify-content: space-between; align-items: center; background: #fff8f8; border: 1px solid #ffcdd2; border-radius: 4px; padding: 5px 8px; margin-bottom: 4px; font-size: 11px; }
+        .kw-weight { color: #d32f2f; font-weight: bold; font-size: 10px; background: #ffebee; padding: 2px 6px; border-radius: 8px; }
+        .log-item { border-bottom: 1px solid #eee; padding: 6px 0; font-size: 11px; display: flex; justify-content: space-between; }
+        .latency-tag { font-size: 10px; color: #64748b; text-align: right; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h2>🛡️ SME-CyberSentry</h2>
+            <p>Localized Phishing Detection</p>
+        </div>
+    </div>
+
+    <div class="nav-tabs">
+        <button class="tab-btn active" data-tab="scanner">Scanner</button>
+        <button class="tab-btn" data-tab="logs">Forensic Logs</button>
+        <button class="tab-btn" data-tab="settings">Allowlist & Settings</button>
+    </div>
+
+    <div class="container">
+        <!-- TAB 1: SCANNER -->
+        <div id="scanner" class="tab-pane active">
+            <div class="url-box" id="current-url">Loading URL...</div>
+            <div class="btn-row">
+                <button id="scanBtn" class="btn-primary">Scan Website</button>
+                <button id="trustBtn" class="btn-secondary">+ Allowlist</button>
+            </div>
+            <div id="result" style="display:none;"></div>
+        </div>
+
+        <!-- TAB 2: FORENSIC LOGS -->
+        <div id="logs" class="tab-pane">
+            <div class="card">
+                <div class="section-title">Recent Forensic Scan Logs</div>
+                <div id="logs-list">Loading logs...</div>
+            </div>
+        </div>
+
+        <!-- TAB 3: ALLOWLIST & SETTINGS -->
+        <div id="settings" class="tab-pane">
+            <div class="card">
+                <div class="section-title">ML Risk Alert Threshold (<span id="thresh-val">70</span>%)</div>
+                <input type="range" id="thresh-slider" min="30" max="90" step="5" value="70" style="width:100%;">
+                <button id="saveSettingsBtn" class="btn-primary" style="width:100%; margin-top:6px;">Save Threshold</button>
+            </div>
+            <div class="card">
+                <div class="section-title">Trusted Domain Allowlist</div>
+                <div id="allowlist-items">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
