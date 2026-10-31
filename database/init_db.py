@@ -66,26 +66,54 @@ VALUES (1, 70.0, 1, 1)
 
 # Seed comprehensive Bahasa Malaysia & Manglish threat phrases
 sample_phrases = [
+    # --- BAHASA MALAYSIA: URGENCY & SECURITY ---
     ("akaun anda disekat", "Bahasa Malaysia", 0.85, "Urgency"),
     ("sila kemaskini segera", "Bahasa Malaysia", 0.80, "Urgency"),
+    ("akaun anda dibekukan", "Bahasa Malaysia", 0.90, "Urgency"),
     ("tindakan merta", "Bahasa Malaysia", 0.75, "Urgency"),
-    ("sila klik pautan ini", "Bahasa Malaysia", 0.72, "Urgency"),
-    ("pengesahan keselamatan", "Bahasa Malaysia", 0.70, "Urgency"),
-    ("akses portal saps anda akan ditamatkan", "Bahasa Malaysia", 0.88, "Urgency"),
-    ("percubaan log masuk dikesan", "Bahasa Malaysia", 0.78, "Urgency"),
+    ("tindakan undang-undang akan diambil", "Bahasa Malaysia", 0.88, "Urgency"),
+    ("pengesahan keselamatan diperlukan", "Bahasa Malaysia", 0.82, "Urgency"),
+    ("log masuk segera", "Bahasa Malaysia", 0.78, "Urgency"),
+    ("kemaskini butiran peribadi anda", "Bahasa Malaysia", 0.75, "Urgency"),
+    ("akaun tamat tempoh", "Bahasa Malaysia", 0.80, "Urgency"),
+    ("pembatalan perkhidmatan", "Bahasa Malaysia", 0.85, "Urgency"),
+    ("sila sahkan identiti", "Bahasa Malaysia", 0.77, "Urgency"),
+    ("kegagalan berbuat demikian", "Bahasa Malaysia", 0.81, "Urgency"),
+    ("amaran keselamatan portal", "Bahasa Malaysia", 0.79, "Urgency"),
+
+    # --- BAHASA MALAYSIA: FINANCIAL & FRAUD ---
+    ("tahniah anda terpilih", "Bahasa Malaysia", 0.88, "Financial"),
     ("menang cabutan bertuah", "Bahasa Malaysia", 0.90, "Financial"),
-    ("tuntut hadiah rm5000", "Bahasa Malaysia", 0.92, "Financial"),
+    ("bantuan tunai e-madani", "Bahasa Malaysia", 0.95, "Financial"),
+    ("bantuan kewangan diluluskan", "Bahasa Malaysia", 0.89, "Financial"),
+    ("semakan lhdn bayaran balik", "Bahasa Malaysia", 0.92, "Financial"),
+    ("tuntut hadiah rm", "Bahasa Malaysia", 0.91, "Financial"),
+    ("akaun m2u anda digantung", "Bahasa Malaysia", 0.95, "Urgency"),
+    ("cimb clicks kemaskini", "Bahasa Malaysia", 0.94, "Urgency"),
+    ("pakej anda ditahan kastam", "Bahasa Malaysia", 0.87, "Financial"),
+    ("tolong bayar kastam", "Bahasa Malaysia", 0.82, "Financial"),
+    ("tebus mata ganjaran", "Bahasa Malaysia", 0.86, "Financial"),
     ("bank in ke akaun", "Bahasa Malaysia", 0.85, "Financial"),
-    ("kemaskini kad kredit anda", "Bahasa Malaysia", 0.89, "Financial"),
-    ("bayaran tertunggak lhdn", "Bahasa Malaysia", 0.86, "Financial"),
-    ("pls update ur bank info", "Manglish", 0.91, "Financial"),
+
+    # --- MANGLISH: URGENCY & SECURITY ---
     ("pls update ur info", "Manglish", 0.82, "Urgency"),
     ("click dis link cepat", "Manglish", 0.85, "Urgency"),
+    ("urgent boss parcel sangkut", "Manglish", 0.85, "Urgency"),
     ("u got parcel stuck dekat warehouse", "Manglish", 0.88, "Urgency"),
-    ("u got parcel sekat", "Manglish", 0.85, "Urgency"),
+    ("pls verify your account", "Manglish", 0.84, "Urgency"),
+    ("account suspended boss", "Manglish", 0.89, "Urgency"),
+    ("click here to unlock", "Manglish", 0.86, "Urgency"),
+    ("system flag ur account", "Manglish", 0.81, "Urgency"),
     ("verify akaun u skrg", "Manglish", 0.84, "Urgency"),
-    ("jangan bagi tac dekat sesiapa", "Manglish", 0.65, "Financial"),
-    ("claim duit bantuan sekarang", "Manglish", 0.87, "Financial")
+    
+    # --- MANGLISH: FINANCIAL & FRAUD ---
+    ("pls update ur bank info", "Manglish", 0.91, "Financial"),
+    ("link untuk claim e-madani", "Manglish", 0.89, "Financial"),
+    ("claim free credit", "Manglish", 0.88, "Financial"),
+    ("lucky draw winner click link", "Manglish", 0.87, "Financial"),
+    ("tng ewallet free claim", "Manglish", 0.93, "Financial"),
+    ("bank in ur money", "Manglish", 0.83, "Financial"),
+    ("jangan bagi tac dekat sesiapa", "Manglish", 0.65, "Financial")
 ]
 
 cursor.executemany('''
