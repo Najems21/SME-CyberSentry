@@ -11,9 +11,35 @@ Design note (why there is no URL_Length feature any more):
     parameters. Instead, the features below look at the *hostname* - the part
     an attacker actually controls and has to disguise.
 """
+import json
 import math
+import os
 import re
 from urllib.parse import urlparse
+
+# Learned per-TLD malicious rate (written by train_model.py). Falls back to a
+# neutral prior when the model hasn't been trained yet.
+TLD_RISK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models', 'tld_risk.json')
+TLD_RISK = {}
+TLD_RISK_DEFAULT = 0.5
+
+
+def load_tld_risk(path=TLD_RISK_PATH):
+    global TLD_RISK, TLD_RISK_DEFAULT
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        TLD_RISK, TLD_RISK_DEFAULT = data['tld_risk'], data['default']
+    except (OSError, ValueError, KeyError):
+        TLD_RISK, TLD_RISK_DEFAULT = {}, 0.5
+
+
+def set_tld_risk(table, default):
+    global TLD_RISK, TLD_RISK_DEFAULT
+    TLD_RISK, TLD_RISK_DEFAULT = table, default
+
+
+load_tld_risk()
 
 # ---------------------------------------------------------------------------
 # Domain knowledge
@@ -116,6 +142,10 @@ TRUSTED_DOMAINS = set().union(*BRAND_OFFICIAL_DOMAINS.values()) | {
     'bharian.com.my', 'hmetro.com.my', 'malaysiakini.com', 'nst.com.my',
     'booking.com', 'agoda.com', 'office.com', 'microsoftonline.com',
     'sharepoint.com', 'live.com', 'uitm.edu.my', 'unisza.edu.my', 'um.edu.my',
+    # Malaysian news / media
+    'buletintv3.my', 'astroawani.com', 'sinarharian.com.my', 'utusan.com.my', 'kosmo.com.my',
+    'freemalaysiatoday.com', 'theedgemalaysia.com', 'malaymail.com', 'says.com', 'lowyat.net',
+    'beritaharian.sg', 'mstar.com.my', 'rtm.gov.my', 'bernama.com', 'harian-metro.com.my',
 }
 TRUSTED_SUFFIXES = ('.gov.my', '.edu.my', '.mil.my')
 
@@ -146,7 +176,18 @@ URL_FEATURE_NAMES = [
     'Host_Entropy',           # randomness of registered domain label
     'Brand_In_Path',          # /maybank/login.php on a domain the brand doesn't own
     'Suspicious_Path',        # .php kits, wp-content uploads, login/verify words in path
+    'Gambling_Host_Words',    # bet / casino / slot / judi / mega888 ... in hostname
+    'Streaming_Host_Words',   # stream / live / tv / nonton / movie ... in hostname
+    'TLD_Risk',               # malicious rate of this TLD, learned from public feeds
 ]
+
+GAMBLING_HOST_WORDS = ('bet', 'casino', 'kasino', 'slot', 'judi', 'togel', 'poker', 'jackpot',
+                       'toto', 'lottery', 'lotto', 'sportsbook', 'baccarat', 'roulette', 'mega888',
+                       '918kiss', 'pussy888', 'xe88', 'scr888', 'bola', 'sabung', 'maxwin', 'gacor',
+                       'spin', 'win', 'luck', '4d', '88', '777', 'gamble', 'wager', 'odds')
+STREAMING_HOST_WORDS = ('stream', 'live', 'tv', 'watch', 'sport', 'football', 'soccer', 'match',
+                        'nonton', 'movie', 'film', 'torrent', 'anime', 'hd', 'free', 'cricket',
+                        'nba', 'epl', 'kick', 'goal')
 
 SUSPICIOUS_PATH_TOKENS = ('.php', 'wp-content', 'wp-includes', 'wp-admin', '/~', '//',
                           'login', 'signin', 'verify', 'secure', 'account', 'update',
@@ -181,6 +222,12 @@ def registered_domain(host):
     if len(parts) >= 3 and '.'.join(parts[-2:]) in MULTI_PART_SUFFIXES:
         return '.'.join(parts[-3:])
     return '.'.join(parts[-2:])
+
+
+def tld_of(host):
+    """Public suffix: 'com.my' for shop.example.com.my, 'cc' for bintv.cc."""
+    reg = registered_domain(host)
+    return reg.split('.', 1)[1] if '.' in reg else ''
 
 
 def is_trusted_domain(host):
@@ -298,6 +345,9 @@ def extract_url_features(url_str):
         'Host_Entropy': round(_entropy(reg_label), 3),
         'Brand_In_Path': brand_in_path,
         'Suspicious_Path': sum(1 for t in SUSPICIOUS_PATH_TOKENS if t in path),
+        'Gambling_Host_Words': sum(1 for w in GAMBLING_HOST_WORDS if w in reg_label),
+        'Streaming_Host_Words': sum(1 for w in STREAMING_HOST_WORDS if w in reg_label),
+        'TLD_Risk': TLD_RISK.get(tld_of(host), TLD_RISK_DEFAULT) if not is_ip else 1.0,
     }
     return feats
 

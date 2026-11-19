@@ -43,7 +43,9 @@ document.getElementById('scanBtn').addEventListener('click', async () => {
         files: ['content.js']
     }, () => {
         chrome.tabs.sendMessage(tab.id, { action: "getDOM" }, async (response) => {
-            const payload = response || { url: activeFullUrl, text: "" };
+            const payload = response || { url: activeFullUrl, text: "", signals: {} };
+            payload.signals = payload.signals || {};
+            payload.signals.downloads = await getRecentDownloads();
             try {
                 const res = await fetch("http://127.0.0.1:5000/scan", {
                     method: "POST",
@@ -60,6 +62,22 @@ document.getElementById('scanBtn').addEventListener('click', async () => {
         });
     });
 });
+
+// Downloads started in the last 15 minutes (Chrome's own download history).
+// The backend keeps only those whose source/referrer is the scanned site.
+async function getRecentDownloads() {
+    if (!chrome.downloads) return [];
+    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    try {
+        const items = await chrome.downloads.search({ startedAfter: since, limit: 20, orderBy: ['-startTime'] });
+        return items.map(d => ({
+            url: d.url, finalUrl: d.finalUrl, referrer: d.referrer, filename: d.filename,
+            mime: d.mime, danger: d.danger, startTime: d.startTime, fileSize: d.fileSize
+        }));
+    } catch (e) {
+        return [];
+    }
+}
 
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({
@@ -83,14 +101,26 @@ function renderScanResult(data) {
     const scoreSpan = (v) => (v || 0) >= 50 ? red((v || 0) + '%') : `<span>${v || 0}%</span>`;
     const domainLabel = escapeHtml(data.registered_domain || data.domain || '-') +
         (data.trusted_domain ? ' <span style="color:#2e7d32">✔ Official</span>' : '');
-    const httpsState = f.Uses_HTTP ? red('No (HTTP)') : '<span>Yes</span>';
+    // HTTPS: verified by a real certificate check on the backend, not just the "https://" prefix
+    const h = data.https || {};
+    let httpsState;
+    if (h.scheme !== 'https') httpsState = red('No (HTTP)');
+    else if (h.checked && h.valid) httpsState = `<span title="Issuer: ${escapeHtml(h.issuer)} · certificate ${h.age_days} days old · expires in ${h.days_left} days">✔ Valid certificate</span>`;
+    else if (h.checked) httpsState = red('✖ Invalid certificate');
+    else httpsState = '<span>Not verified</span>';
+
+    const categoryHtml = (data.category && data.category !== 'None' && data.category !== 'Allowlisted')
+        ? `<div style="font-size:12px; font-weight:bold; margin:-4px 0 8px;" class="${statusClass}">Threat type: ${escapeHtml(data.category)}</div>` : '';
 
     let flagsHtml = "";
     if (!data.allowlisted) {
-        const flags = data.url_flags || [];
-        flagsHtml = flags.length
-            ? flags.map(fl => `<div class="kw-item"><span>⚠ ${escapeHtml(fl)}</span></div>`).join('')
-            : `<p style="font-size:11px; color:#64748b; margin:0 0 6px;">No suspicious URL signals.</p>`;
+        const items = [...(data.reasons || []), ...(data.url_flags || [])];
+        flagsHtml = items.length
+            ? items.map(fl => `<div class="kw-item"><span>⚠ ${escapeHtml(fl)}</span></div>`).join('')
+            : `<p style="font-size:11px; color:#64748b; margin:0 0 6px;">No suspicious URL, download or content signals.</p>`;
+        if (data.popularity_rank) {
+            flagsHtml += `<p style="font-size:10px; color:#64748b; margin:0 0 6px;">Popularity: Tranco rank #${data.popularity_rank.toLocaleString()}</p>`;
+        }
     }
 
     let kwHtml = "";
@@ -121,11 +151,12 @@ function renderScanResult(data) {
                 <span class="${statusClass}">${label}</span>
                 <span class="score-badge ${badgeClass}">${data.risk_score}%</span>
             </div>
+            ${categoryHtml}
 
             <div class="section-title">🔍 Feature Analysis</div>
             <div class="feature-grid">
                 <div class="feature-box">Domain <span>${domainLabel}</span></div>
-                <div class="feature-box">Secure (HTTPS) ${httpsState}</div>
+                <div class="feature-box">HTTPS ${httpsState}</div>
                 <div class="feature-box">URL Model Risk ${scoreSpan(data.url_score)}</div>
                 <div class="feature-box">Content Risk ${scoreSpan(data.text_score)}</div>
             </div>

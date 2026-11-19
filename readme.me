@@ -76,9 +76,53 @@ The engine runs **two models**, each trained on the signal it can actually learn
 * The page text is split into sentences. Each sentence that uses enough known Malay vocabulary is scored by the text model.
 * Phrases in `THREAT_DICTIONARY` (Bahasa Malaysia, Manglish, English) are combined with a noisy-OR rule, so several phrases strengthen each other while a single phrase stays moderate.
 
-### 3. Fusion
-* `Risk = max(URL score, Content score)`. Add +10 when both are ≥ 50%.
-* **Official domains** (e.g. `google.com`, `maybank2u.com.my`, `*.gov.my`) never get a *Danger* verdict from the URL. If the page *shows* scam text, such as a phishing email open in Gmail, the result is capped at **Medium Risk** with a warning.
+### 3. Threat intelligence, behaviour & certificate checks (`backend/threat_rules.py`)
+| Check | Example it catches |
+| :--- | :--- |
+| **Offline blocklist lookup**: 5.2M known-bad hostnames from public feeds (`database/threat_intel.db`) | `bintv.cc` (malware feed), known gambling and piracy domains |
+| **Drive-by downloads**: the extension reports files the site actually downloaded (`chrome.downloads`) | `jtp-photography.com` silently downloading a `Setup.exe` |
+| **Malvertising redirects**: ad-network URL parameters (`zoneid`, `cost`, `clickid`, `subid`…) | Pop-under landing pages |
+| **Online gambling**: Malay/English betting terms from `THREAT_DICTIONARY` (category *Gambling*) | `mega888`, `slot online`, `kredit percuma`, `sportsbook` |
+| **Illegal streaming**: "free in HD / no sign-up" phrases plus sports or movie context | Free cricket/football streams full of malicious ads |
+| **Fake alerts**: tech-support scams and "click Allow" notification tricks | "Your computer is infected, call Microsoft Support" |
+| **Credential forms**: a password field on HTTP, or a form that posts to another site | Fake login pages |
+| **HTTPS certificate**: a real TLS handshake with chain and hostname verification | Expired, self-signed or wrong-host certificates |
+
+#### How HTTPS is checked
+The address bar only shows that a page *claims* `https://`. The engine actually connects to the site and verifies the certificate chain against the Windows trust store plus Mozilla's root bundle (`certifi`). It also checks the hostname, expiry date and issuer. A **valid certificate only means the connection is encrypted, not that the site is honest**: most phishing sites have free valid certificates. So a valid certificate never lowers the risk score; an *invalid* one raises it.
+
+### 4. Fusion
+* `Risk = max(URL score, content score, strongest behaviour/blocklist finding)`. Add +10 when at least two engines are ≥ 50%.
+* The URL score is **calibrated** for real-world prevalence. A raw model score of 80 maps to the Danger threshold of 70; only 1.3% of unseen legitimate sites score that high.
+* Very popular sites (Tranco top 10k / 100k) have their URL-only score reduced.
+* **Official domains** (e.g. `google.com`, `maybank2u.com.my`, `*.gov.my`) never reach *Danger*. If the page *shows* scam content, such as a phishing email open in Gmail, the result is capped at **Medium Risk** with a warning.
+* The **threat type** shown (Phishing, Online Gambling, Drive-by Download, Illegal Streaming…) comes from concrete evidence first, and from the URL model's guess only when there is none.
+
+### 5. Evaluation
+| Test | Result |
+| :--- | :--- |
+| URL model, held-out domains (malicious vs legit) | **85.7% accuracy** (gambling F1 0.89, piracy 0.81, phishing 0.74) |
+| Text model, unseen sentence templates | **97.0% accuracy** |
+| Scenario suite (`python backend/test_scan_scenarios.py`) | **33/33**: 13 safe, 3 medium, 17 high-risk sites |
+| 2,000 unseen legit Tranco domains, URL only | 1.3% Danger |
+| 2,000 *new* phishing URLs not on any blocklist, URL only | 72% flagged (Medium or above); content and behaviour checks add more |
+
+---
+
+## 📚 Data Sources (public only)
+
+| Source | Used for | Licence / terms |
+| :--- | :--- | :--- |
+| [OpenPhish Community Feed](https://openphish.com/) | Live phishing URLs | [Terms](https://openphish.com/terms.html) |
+| [Phishing.Database](https://github.com/mitchellkrogza/Phishing.Database) | Active phishing URLs | See repository |
+| [Phishing Army](https://phishing.army/) | Phishing domains | [Licence](https://phishing.army/license/) |
+| [HaGeZi DNS Blocklists](https://github.com/hagezi/dns-blocklists) (Threat Intelligence Feeds, Gambling, Anti-Piracy) | Malware/scam, gambling, piracy domains | GPL-3.0 |
+| [The Block List Project](https://github.com/blocklistproject/Lists) | Gambling, piracy, scam, malware domains | Unlicense |
+| [Citizen Lab test list (Malaysia)](https://github.com/citizenlab/test-lists/blob/master/lists/my.csv) | Malaysian gambling sites (GMB) | CC BY-NC-SA 4.0 |
+| [Tranco list](https://tranco-list.eu/) (incl. subdomains) | Legitimate / popular domains | Free for research (Le Pochat et al., NDSS 2019) |
+| `url_dataset_synthetic.csv` | Malaysian-brand phishing patterns and long legitimate URLs (generated) | This project |
+
+The feeds are handled as **text only**; the system never visits the listed sites. `fetch_threat_intel.py` re-downloads the latest versions. URLhaus (abuse.ch) malware URLs can be added with a free Auth-Key.
 
 ---
 
@@ -86,7 +130,8 @@ The engine runs **two models**, each trained on the signal it can actually learn
 
 1. **`THREAT_DICTIONARY`**: Stores localized Bahasa Malaysia & Manglish scam phrases, language types, categories (`Urgency`, `Financial`), and risk weights.
 6. **`TRAINING_DATASET`**: Every row of `train_data.csv`, `test_data.csv`, and `emails_cleaned.csv` (12,400 rows), with label, source file, and split.
-7. **`URL_DATASET`**: 6,000 labelled URLs for the URL model (`url_dataset.csv`).
+7. **`URL_DATASET`**: About 75,000 labelled URLs (legit / phishing / malware / scam / gambling / piracy) from public feeds, Tranco and the synthetic supplement.
+8. **`threat_intel.db`** *(separate file, rebuilt by `fetch_threat_intel.py`)*: `THREAT_INTEL_DOMAINS` (5.2M hostnames), `POPULAR_DOMAINS` (Tranco top-100k) and `FEED_SOURCES`.
 2. **`FORENSIC_SCAN_LOGS`**: Logs every scanned URL, timestamp, NLP keyword hit count, ML risk score, and final status verdict.
 3. **`EXTRACTED_ML_FEATURES`**: Stores individual lexical feature values linked via Foreign Key (`Log_ID`) to `FORENSIC_SCAN_LOGS`.
 4. **`USER_ALLOWLIST`**: Stores trusted domain names that bypass scanning to save CPU resources.
@@ -121,9 +166,10 @@ pip install -r requirements.txt
 
 ### 4. Initialize the SQLite Database & Import the Datasets
 ```bash
-python database/init_db.py            # schema + hand-curated Threat Dictionary
-python backend/build_url_dataset.py   # (re)generates dataset/url_dataset.csv
-python database/import_datasets.py    # loads ALL CSVs into the DB + mines dictionary phrases
+python database/init_db.py              # schema + hand-curated Threat Dictionary
+python backend/fetch_threat_intel.py    # downloads public feeds -> threat_intel.db (~280 MB) + url_dataset_public.csv
+python backend/build_url_dataset.py     # Malaysian synthetic supplement -> url_dataset_synthetic.csv
+python database/import_datasets.py      # loads ALL CSVs into the DB + mines dictionary phrases
 ```
 
 ### 5. Train the Models (Optional if `.pkl` files are already present)

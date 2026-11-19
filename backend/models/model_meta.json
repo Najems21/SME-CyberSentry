@@ -1,5 +1,5 @@
 {
-  "trained_at": "2026-11-19T11:35:28",
+  "trained_at": "2026-11-19T13:05:09",
   "url_features": [
     "Hostname_Length",
     "Num_Subdomains",
@@ -17,23 +17,33 @@
     "Is_Punycode",
     "Host_Entropy",
     "Brand_In_Path",
-    "Suspicious_Path"
+    "Suspicious_Path",
+    "Gambling_Host_Words",
+    "Streaming_Host_Words",
+    "TLD_Risk"
   ],
-  "url_training_rows": 6000,
+  "url_classes": [
+    "legit",
+    "phishing",
+    "gambling",
+    "piracy"
+  ],
+  "url_training_rows": 66983,
   "text_training_sentences": 2524,
   "metrics": {
-    "url_rf": {
-      "accuracy": 0.9969,
-      "f1": 0.9972
+    "url_rf_binary": {
+      "accuracy": 0.8084,
+      "f1": 0.7978
     },
-    "url_xgb": {
-      "accuracy": 0.9969,
-      "f1": 0.9972
+    "url_xgb_binary": {
+      "accuracy": 0.867,
+      "f1": 0.8348
     },
-    "url_ensemble": {
-      "accuracy": 0.9958,
-      "f1": 0.9963
+    "url_ensemble_binary": {
+      "accuracy": 0.857,
+      "f1": 0.8314
     },
+    "url_category_accuracy": 0.8479,
     "text_test_csv": {
       "accuracy": 1.0,
       "f1": 1.0

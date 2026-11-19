@@ -7,8 +7,12 @@ Trains the SME-CyberSentry hybrid engine from the data stored in cybersentry.db.
 
 Two independent models are trained, each on the signal it can actually learn:
 
-1. URL model  (Random Forest + XGBoost ensemble)  -> models/rf_model.pkl, xgb_model.pkl
-   Trained on URL_DATASET using hostname-based lexical features
+1. URL model  (Random Forest + XGBoost ensemble, multi-class)
+   -> models/rf_model.pkl, xgb_model.pkl, tld_risk.json
+   Classes: legit / phishing / gambling / piracy  (malware & scam domains are
+   handled by the threat-intel lookup - see note in section 1).
+   Trained on URL_DATASET (~75k URLs: public threat feeds + Tranco + a Malaysian
+   synthetic supplement) using hostname-based lexical features
    (see features.URL_FEATURE_NAMES). Raw URL length is intentionally NOT used:
    long URLs are normal for Gmail, Google Search, Shopee, banking portals, etc.
 
@@ -43,7 +47,10 @@ from xgboost import XGBClassifier
 
 BACKEND = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BACKEND)
-from features import URL_FEATURE_NAMES, extract_url_features, registered_domain, parse_url, strip_urls  # noqa: E402
+from features import (URL_FEATURE_NAMES, extract_url_features, parse_url, registered_domain,  # noqa: E402
+                      set_tld_risk, strip_urls, tld_of)
+
+URL_CLASSES = ['legit', 'phishing', 'gambling', 'piracy']
 
 DB_PATH = os.path.join(os.path.dirname(BACKEND), 'database', 'cybersentry.db')
 MODELS_DIR = os.path.join(BACKEND, 'models')
@@ -62,38 +69,85 @@ conn = sqlite3.connect(DB_PATH)
 metrics = {}
 
 # =====================================================================
-# 1. URL MODEL
+# 1. URL MODEL  (multi-class: legit / phishing / gambling / piracy)
 # =====================================================================
-print("=" * 70 + "\n1. URL MODEL (Random Forest + XGBoost)\n" + "=" * 70)
-url_df = pd.read_sql("SELECT URL, Label FROM URL_DATASET", conn)
+print("=" * 70 + "\n1. URL MODEL (Random Forest + XGBoost, multi-class)\n" + "=" * 70)
+url_df = pd.read_sql("SELECT URL, Label, Category, Source FROM URL_DATASET", conn)
 if url_df.empty:
-    raise SystemExit("URL_DATASET is empty - run build_url_dataset.py and import_datasets.py first.")
-X_url = pd.DataFrame([extract_url_features(u) for u in url_df.URL], columns=URL_FEATURE_NAMES)
-y_url = (url_df.Label == 'phishing').astype(int).values
-groups = [registered_domain(parse_url(u)[1]) for u in url_df.URL]
+    raise SystemExit("URL_DATASET is empty - run fetch_threat_intel.py, build_url_dataset.py and import_datasets.py first.")
+# Domain-only malware/scam entries (random C2, tracker and throwaway names such as
+# 'homeserviceoutreachpartners.com') carry almost no lexical signal: including them
+# raised false positives on legitimate sites from 8% to 17% in our experiments.
+# They are detected by the THREAT_INTEL_DOMAINS lookup instead (millions of entries).
+url_df = url_df[~url_df.Category.isin(['malware', 'scam'])].reset_index(drop=True)
+y_url = url_df.Category.map({c: i for i, c in enumerate(URL_CLASSES)}).values
+y_bin = (y_url != 0).astype(int)
+hosts = [parse_url(u)[1] for u in url_df.URL]
+groups = [registered_domain(h) for h in hosts]
+tlds = pd.Series([tld_of(h) for h in hosts])
+print("Rows per category:", url_df.Category.value_counts().to_dict())
 
-tr_idx, te_idx = next(GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42).split(X_url, y_url, groups))
-X_tr, X_te, y_tr, y_te = X_url.iloc[tr_idx], X_url.iloc[te_idx], y_url[tr_idx], y_url[te_idx]
-print(f"Train: {len(X_tr)} URLs | Test: {len(X_te)} URLs (test domains unseen in training)")
 
-rf_model = RandomForestClassifier(n_estimators=300, min_samples_leaf=2, class_weight='balanced',
-                                  random_state=42, n_jobs=-1)
-xgb_model = XGBClassifier(n_estimators=300, max_depth=5, learning_rate=0.08, subsample=0.9,
-                          colsample_bytree=0.9, eval_metric='logloss', random_state=42)
+def fit_tld_risk(idx, m=20):
+    """Smoothed malicious rate per TLD, computed ONLY from the given rows."""
+    prior = y_bin[idx].mean()
+    g = pd.DataFrame({'tld': tlds.iloc[idx].values, 'y': y_bin[idx]}).groupby('tld').y.agg(['sum', 'count'])
+    table = ((g['sum'] + m * prior) / (g['count'] + m)).round(4).to_dict()
+    return table, round(float(prior), 4)
+
+
+def build_X(urls):
+    return pd.DataFrame([extract_url_features(u) for u in urls], columns=URL_FEATURE_NAMES)
+
+
+def make_url_models():
+    rf = RandomForestClassifier(n_estimators=150, max_depth=18, min_samples_leaf=8,
+                                class_weight='balanced_subsample', random_state=42, n_jobs=-1)
+    xgb = XGBClassifier(n_estimators=400, max_depth=7, learning_rate=0.1, subsample=0.9,
+                        colsample_bytree=0.9, objective='multi:softprob', eval_metric='mlogloss',
+                        random_state=42, n_jobs=-1)
+    return rf, xgb
+
+
+tr_idx, te_idx = next(GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42).split(url_df, y_url, groups))
+set_tld_risk(*fit_tld_risk(tr_idx))
+X_all = build_X(url_df.URL)
+X_tr, X_te, y_tr, y_te = X_all.iloc[tr_idx], X_all.iloc[te_idx], y_url[tr_idx], y_url[te_idx]
+print(f"Train: {len(X_tr)} URLs | Test: {len(X_te)} URLs (test domains never seen in training)")
+
+rf_model, xgb_model = make_url_models()
 rf_model.fit(X_tr, y_tr)
 xgb_model.fit(X_tr, y_tr)
+proba = (rf_model.predict_proba(X_te) + xgb_model.predict_proba(X_te)) / 2
+risk = 1 - proba[:, 0]
 
-metrics['url_rf'] = report("URL Random Forest", y_te, rf_model.predict(X_te))
-metrics['url_xgb'] = report("URL XGBoost", y_te, xgb_model.predict(X_te))
-ens = (rf_model.predict_proba(X_te)[:, 1] + xgb_model.predict_proba(X_te)[:, 1]) / 2
-metrics['url_ensemble'] = report("URL Ensemble (average)", y_te, (ens >= 0.5).astype(int))
+metrics['url_rf_binary'] = report("URL Random Forest (malicious vs legit)", y_te != 0, rf_model.predict_proba(X_te)[:, 0] < 0.5)
+metrics['url_xgb_binary'] = report("URL XGBoost (malicious vs legit)", y_te != 0, xgb_model.predict_proba(X_te)[:, 0] < 0.5)
+metrics['url_ensemble_binary'] = report("URL Ensemble (malicious vs legit)", y_te != 0, risk >= 0.5)
+
+pred_cat = proba.argmax(1)
+print("\n--- URL Ensemble: category report ---")
+print(classification_report(y_te, pred_cat, target_names=URL_CLASSES, digits=4))
+print("Confusion matrix (rows = true, cols = predicted):", URL_CLASSES)
+print(confusion_matrix(y_te, pred_cat))
+metrics['url_category_accuracy'] = round(accuracy_score(y_te, pred_cat), 4)
+
+te = url_df.iloc[te_idx].assign(flagged=risk >= 0.5)
+print("\nDetection rate per data source (share flagged as malicious):")
+print(te.groupby('Source').flagged.agg(['mean', 'size']).round(3).sort_values('mean').to_string())
 
 imp = pd.Series(rf_model.feature_importances_, index=URL_FEATURE_NAMES).sort_values(ascending=False)
-print("Random Forest feature importance:\n" + imp.round(4).to_string())
+print("\nRandom Forest feature importance:\n" + imp.round(4).to_string())
 
-# Refit on all data for deployment
-rf_model.fit(X_url, y_url)
-xgb_model.fit(X_url, y_url)
+# Refit on ALL data for deployment (TLD table from all rows too)
+tld_table, tld_default = fit_tld_risk(np.arange(len(url_df)))
+set_tld_risk(tld_table, tld_default)
+X_all = build_X(url_df.URL)
+rf_model, xgb_model = make_url_models()
+rf_model.fit(X_all, y_url)
+xgb_model.fit(X_all, y_url)
+with open(os.path.join(MODELS_DIR, 'tld_risk.json'), 'w') as fh:
+    json.dump({'tld_risk': tld_table, 'default': tld_default}, fh)
 
 # =====================================================================
 # 2. TEXT MODEL
@@ -155,29 +209,35 @@ checks = [
     "https://www.google.com/search?q=cara+bayar+cukai+lhdn+online&oq=cara+bayar&sourceid=chrome&ie=UTF-8",
     "https://shopee.com.my/Baju-Kurung-Moden-i.123456789.987654321?sp_atk=abc-123&xptdk=def",
     "https://www.maybank2u.com.my/home/m2u/common/login.do",
+    "https://www.espn.com/cricket/",
     "https://kedaikopimesra.com.my/menu",
+    "https://jtp-photography.com/worldpage/indexw.php?cost=0.001099&country=MY&zoneid=10491721",
+    "https://www.bintv.cc/",
+    "https://win88my-slot.com/",
+    "https://mega888-download.online/",
+    "https://nonton-bola-live.xyz/",
     "http://semakan-lhdn-gov.top",
     "http://bit.ly/kemaskini-akaun-2026",
     "https://maybank2u-secure-login.com/m2u/login.do",
-    "http://www.maybank2u.com.my.verify-acc.xyz/login.php",
     "http://103.21.44.9/cimb/login.php",
     "https://rnaybank2u.com/login",
-    "https://shopee-claim-hadiah.web.app/claim",
 ]
-Xc = pd.DataFrame([extract_url_features(u) for u in checks], columns=URL_FEATURE_NAMES)
-pc = (rf_model.predict_proba(Xc)[:, 1] + xgb_model.predict_proba(Xc)[:, 1]) / 2 * 100
+Xc = build_X(checks)
+pc = (rf_model.predict_proba(Xc) + xgb_model.predict_proba(Xc)) / 2
 for u, p in zip(checks, pc):
-    print(f"  {p:5.1f}%  {u}")
+    cat = URL_CLASSES[int(p[1:].argmax()) + 1]
+    print(f"  risk {100 * (1 - p[0]):5.1f}%  likely={cat:9s} {u}")
 
 # =====================================================================
 # 4. SAVE
 # =====================================================================
-joblib.dump(rf_model, os.path.join(MODELS_DIR, 'rf_model.pkl'))
-joblib.dump(xgb_model, os.path.join(MODELS_DIR, 'xgb_model.pkl'))
+joblib.dump(rf_model, os.path.join(MODELS_DIR, 'rf_model.pkl'), compress=3)
+joblib.dump(xgb_model, os.path.join(MODELS_DIR, 'xgb_model.pkl'), compress=3)
 joblib.dump(text_model, os.path.join(MODELS_DIR, 'text_model.pkl'))
 with open(os.path.join(MODELS_DIR, 'model_meta.json'), 'w') as fh:
     json.dump({'trained_at': datetime.now().isoformat(timespec='seconds'),
                'url_features': URL_FEATURE_NAMES,
+               'url_classes': URL_CLASSES,
                'url_training_rows': len(url_df),
                'text_training_sentences': len(train_txt),
                'metrics': metrics}, fh, indent=2)

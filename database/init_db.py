@@ -79,11 +79,16 @@ def create_schema(cursor):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_training_split ON TRAINING_DATASET(Split)')
 
     # 7. URL_DATASET - labelled URLs for the URL lexical model
+    #    (derived data: rebuilt by import_datasets.py, so an old layout is simply replaced)
+    cols = [r[1] for r in cursor.execute("PRAGMA table_info(URL_DATASET)")]
+    if cols and 'Category' not in cols:
+        cursor.execute("DROP TABLE URL_DATASET")
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS URL_DATASET (
         URL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         URL TEXT UNIQUE NOT NULL,
-        Label TEXT NOT NULL CHECK (Label IN ('phishing', 'legit')),
+        Label TEXT NOT NULL CHECK (Label IN ('malicious', 'legit')),
+        Category TEXT NOT NULL CHECK (Category IN ('legit', 'phishing', 'malware', 'scam', 'gambling', 'piracy')),
         Source TEXT NOT NULL
     )''')
 
@@ -152,6 +157,59 @@ MANUAL_PHRASES = [
     ("failed delivery attempt", "English", 0.70, "Delivery"),
     ("pay the redelivery fee", "English", 0.85, "Delivery"),
     ("act now or your account", "English", 0.85, "Urgency"),
+
+    # ===== Content categories used by backend/threat_rules.py =====
+    # Weight >= 0.85 = "strong" term (at least one is required before the
+    # category is reported); weaker terms only add supporting evidence.
+    # --- Online gambling / sports betting (illegal in Malaysia) ---
+    *[(p, lang, 0.9, "Gambling") for p, lang in [
+        ("judi online", "Bahasa Malaysia"), ("situs judi", "Bahasa Malaysia"), ("taruhan bola", "Bahasa Malaysia"),
+        ("kredit percuma", "Bahasa Malaysia"), ("sabung ayam", "Bahasa Malaysia"), ("slot gacor", "Bahasa Malaysia"),
+        ("judi bola", "Bahasa Malaysia"), ("free kredit", "Manglish"), ("slot online", "English"),
+        ("online casino", "English"), ("casino online", "English"), ("live casino", "English"),
+        ("sportsbook", "English"), ("sports betting", "English"), ("mega888", "English"), ("918kiss", "English"),
+        ("pussy888", "English"), ("xe88", "English"), ("scr888", "English"), ("togel", "English"),
+        ("baccarat", "English"), ("roulette", "English"), ("1xbet", "English"), ("sbobet", "English"),
+        ("maxwin", "English"), ("free credit", "English"), ("place your bet", "English"), ("bet now", "English"),
+        ("betting odds", "English"), ("slot machine", "English"), ("e-sports betting", "English")]],
+    *[(p, lang, 0.5, "Gambling") for p, lang in [
+        ("casino", "English"), ("jackpot", "English"), ("free spins", "English"), ("welcome bonus", "English"),
+        ("deposit bonus", "English"), ("min deposit", "English"), ("minimum deposit", "English"),
+        ("withdrawal", "English"), ("odds", "English"), ("handicap", "English"), ("poker", "English"),
+        ("betting", "English"), ("4d result", "English"), ("keputusan 4d", "Bahasa Malaysia"),
+        ("cuci duit", "Manglish"), ("deposit", "English"), ("rebate", "English"), ("bonus 100%", "English")]],
+    # --- Illegal / unofficial streaming ---
+    *[(p, lang, 0.9, "Illegal Streaming") for p, lang in [
+        ("for free in hd", "English"), ("no sign-up", "English"), ("no sign up", "English"),
+        ("no subscription", "English"), ("no registration", "English"), ("free live stream", "English"),
+        ("watch free", "English"), ("stream free", "English"), ("24/7 for free", "English"),
+        ("live stream free", "English"), ("tonton percuma", "Bahasa Malaysia"), ("nonton bola", "Bahasa Malaysia"),
+        ("siaran langsung percuma", "Bahasa Malaysia"), ("free movies online", "English")]],
+    *[(p, lang, 0.4, "Illegal Streaming") for p, lang in [
+        ("watch live", "English"), ("live stream", "English"), ("live streaming", "English"), ("watch now", "English"),
+        ("hd stream", "English"), ("siaran langsung", "Bahasa Malaysia"), ("just press play", "English")]],
+    # --- Drive-by / automatic downloads ---
+    ("download has started automatically", "English", 0.95, "Drive-by Download"),
+    ("if the download does not start automatically", "English", 0.90, "Drive-by Download"),
+    ("if your download does not start", "English", 0.85, "Drive-by Download"),
+    ("download started", "English", 0.60, "Drive-by Download"),
+    ("your download will begin", "English", 0.60, "Drive-by Download"),
+    ("your file is ready to download", "English", 0.60, "Drive-by Download"),
+    ("download will start shortly", "English", 0.60, "Drive-by Download"),
+    ("muat turun anda akan bermula", "Bahasa Malaysia", 0.60, "Drive-by Download"),
+    ("muat turun telah bermula", "Bahasa Malaysia", 0.80, "Drive-by Download"),
+    # --- Fake security alerts / "click Allow" notification scams ---
+    ("your computer is infected", "English", 0.95, "Fake Alert"),
+    ("your pc is infected", "English", 0.95, "Fake Alert"),
+    ("virus detected", "English", 0.80, "Fake Alert"),
+    ("call microsoft support", "English", 0.95, "Fake Alert"),
+    ("windows defender alert", "English", 0.90, "Fake Alert"),
+    ("your computer has been blocked", "English", 0.90, "Fake Alert"),
+    ("click allow if you are not a robot", "English", 0.95, "Fake Alert"),
+    ("press allow to verify", "English", 0.90, "Fake Alert"),
+    ("click allow to continue", "English", 0.85, "Fake Alert"),
+    ("flash player update required", "English", 0.80, "Fake Alert"),
+    ("komputer anda dijangkiti virus", "Bahasa Malaysia", 0.95, "Fake Alert"),
 ]
 
 

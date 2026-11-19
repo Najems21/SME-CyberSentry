@@ -7,7 +7,8 @@ Threat Dictionary with data-driven phrases.
 
 Tables filled:
     TRAINING_DATASET  <- train_data.csv, test_data.csv, emails_cleaned.csv
-    URL_DATASET       <- url_dataset.csv (built by backend/build_url_dataset.py)
+    URL_DATASET       <- url_dataset_public.csv    (real public feeds, fetch_threat_intel.py)
+                         url_dataset_synthetic.csv (Malaysian supplement, build_url_dataset.py)
     THREAT_DICTIONARY <- phrases mined from the phishing sentences
 
 How dictionary weights are computed:
@@ -30,7 +31,7 @@ DATASET_DIR = os.path.join(ROOT, 'backend', 'dataset')
 
 # CSV -> split. Any other CSV with text,label columns is imported as 'train'.
 EMAIL_SPLITS = {'train_data.csv': 'train', 'test_data.csv': 'test', 'emails_cleaned.csv': 'train'}
-URL_CSV = 'url_dataset.csv'
+URL_CSVS = ['url_dataset_public.csv', 'url_dataset_synthetic.csv']
 
 MIN_SUPPORT = 15
 MIN_PRECISION = 0.85
@@ -80,7 +81,7 @@ def import_email_csvs(cur):
     cur.execute("DELETE FROM TRAINING_DATASET")
     total = 0
     for name in sorted(os.listdir(DATASET_DIR)):
-        if not name.endswith('.csv') or name == URL_CSV:
+        if not name.endswith('.csv') or name in URL_CSVS:
             continue
         df = pd.read_csv(os.path.join(DATASET_DIR, name))
         if not {'text', 'label'} <= set(df.columns):
@@ -100,16 +101,20 @@ def import_email_csvs(cur):
 
 
 def import_url_csv(cur):
-    path = os.path.join(DATASET_DIR, URL_CSV)
-    if not os.path.exists(path):
-        print(f"  {URL_CSV} not found - run: python backend/build_url_dataset.py")
-        return 0
-    df = pd.read_csv(path)
     cur.execute("DELETE FROM URL_DATASET")
-    cur.executemany("INSERT OR IGNORE INTO URL_DATASET (URL, Label, Source) VALUES (?, ?, ?)",
-                    df[['url', 'label', 'source']].itertuples(index=False, name=None))
-    print(f"  {URL_CSV:22s} -> URL_DATASET: {len(df)} rows")
-    return len(df)
+    total = 0
+    for name in URL_CSVS:
+        path = os.path.join(DATASET_DIR, name)
+        if not os.path.exists(path):
+            hint = 'fetch_threat_intel.py' if 'public' in name else 'build_url_dataset.py'
+            print(f"  {name} not found - run: python backend/{hint}")
+            continue
+        df = pd.read_csv(path)
+        cur.executemany("INSERT OR IGNORE INTO URL_DATASET (URL, Label, Category, Source) VALUES (?, ?, ?, ?)",
+                        df[['url', 'label', 'category', 'source']].itertuples(index=False, name=None))
+        print(f"  {name:26s} -> URL_DATASET: {len(df)} rows")
+        total += len(df)
+    return total
 
 
 def mine_dictionary(cur):

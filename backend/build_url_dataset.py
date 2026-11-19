@@ -1,5 +1,10 @@
 """
-Builds backend/dataset/url_dataset.csv - the training corpus for the URL model.
+Builds backend/dataset/url_dataset_synthetic.csv - a Malaysian-specific SUPPLEMENT
+to the real public data in url_dataset_public.csv (see fetch_threat_intel.py).
+
+The public feeds are global: they contain few Maybank / LHDN / Shopee-MY style
+phishing URLs, and Tranco only provides bare domains (no long legitimate paths).
+This generator fills exactly those two gaps.
 
 Why this exists:
     The email CSVs only contain 4 distinct phishing URLs and the legitimate
@@ -24,7 +29,7 @@ import random
 import string
 
 rng = random.Random(2026)
-OUT = os.path.join(os.path.dirname(__file__), 'dataset', 'url_dataset.csv')
+OUT = os.path.join(os.path.dirname(__file__), 'dataset', 'url_dataset_synthetic.csv')
 EMAIL_CSVS = ['train_data.csv', 'test_data.csv', 'emails_cleaned.csv']
 
 
@@ -284,26 +289,28 @@ def main(n_per_class=3000):
     def add(url, label, source):
         if url not in seen:
             seen.add(url)
-            rows.append((url, label, source))
+            rows.append((url, 'legit' if label == 'legit' else 'malicious',
+                         'legit' if label == 'legit' else 'phishing', 'synthetic_' + source))
 
     for u in email_csv_urls():
         add(u, 'phishing', 'email_csv')
+    count = lambda lab: sum(1 for r in rows if r[1] == lab)
 
     sme_quota = int(n_per_class * 0.2)
-    while sum(1 for r in rows if r[2] == 'legit_sme') < sme_quota:
+    while sum(1 for r in rows if r[3] == 'synthetic_legit_sme') < sme_quota:
         add(legit_sme(), 'legit', 'legit_sme')
-    while sum(1 for r in rows if r[1] == 'legit') < n_per_class:
+    while count('legit') < n_per_class:
         add(rng.choice(LEGIT_TEMPLATES)(), 'legit', 'legit_official')
 
     gens, weights = zip(*PHISH_GENERATORS)
-    while sum(1 for r in rows if r[1] == 'phishing') < n_per_class:
+    while count('malicious') < n_per_class:
         g = rng.choices(gens, weights)[0]
         add(g(), 'phishing', 'phish_' + g.__name__[2:])
 
     rng.shuffle(rows)
     with open(OUT, 'w', newline='', encoding='utf-8') as fh:
         w = csv.writer(fh)
-        w.writerow(['url', 'label', 'source'])
+        w.writerow(['url', 'label', 'category', 'source'])
         w.writerows(rows)
     print(f"Wrote {len(rows)} URLs to {OUT}")
 

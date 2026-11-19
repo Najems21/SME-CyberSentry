@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 database/cybersentry.db
 database/*.bak
+database/threat_intel.db
+backend/dataset/raw_feeds/
