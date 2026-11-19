@@ -11,7 +11,7 @@
 
 **SME-CyberSentry** is an intelligent, lightweight web browser extension designed to provide real-time, localized phishing protection for Small and Medium Enterprises (SMEs) in Malaysia. 
 
-Conventional anti-phishing solutions rely heavily on static blacklists (which fail against zero-day attacks), suffer from English-centric dataset bias, or require resource-heavy cloud API queries that cause browsing lag. Adhering to the **Least Cybersecurity Control Implementation (LCCI)** framework, SME-CyberSentry operates entirely locally on the client's machine to safeguard user privacy and maintain zero browsing latency ($\sim 15\text{ ms}$ inference time).
+Conventional anti-phishing solutions rely heavily on static blacklists (which fail against zero-day attacks), suffer from English-centric dataset bias, or require resource-heavy cloud API queries that cause browsing lag. Adhering to the **Least Cybersecurity Control Implementation (LCCI)** framework, SME-CyberSentry operates entirely locally on the client's machine to safeguard user privacy and keep browsing fast: a scan takes about 35 ms locally. The first visit to a site adds one HTTPS certificate check, which is then cached for an hour.
 
 ### ✨ Key Features
 * **Hybrid ML & NLP Detection Engine:** Combines structural URL lexical analysis with semantic Natural Language Processing (NLP) using an ensemble of **Random Forest** and **XGBoost** classifiers.
@@ -28,25 +28,38 @@ Conventional anti-phishing solutions rely heavily on static blacklists (which fa
 SME-CyberSentry/
 ├── backend/
 │   ├── dataset/
-│   │   ├── emails_cleaned.csv    # Cleaned Malay phishing email dataset
-│   │   ├── train_data.csv        # 80% Training dataset split
-│   │   └── test_data.csv         # 20% Testing dataset split
+│   │   ├── emails_cleaned.csv         # Cleaned Malay phishing email dataset
+│   │   ├── train_data.csv             # 80% training split
+│   │   ├── test_data.csv              # 20% testing split
+│   │   ├── url_dataset_public.csv     # ~69k labelled URLs from public feeds + Tranco
+│   │   ├── url_dataset_synthetic.csv  # 6k Malaysian-brand synthetic URLs
+│   │   └── SENTENCE_LIST.md           # Phishing / legitimate sentence templates
 │   ├── models/
-│   │   ├── rf_model.pkl          # Trained Random Forest model binary
-│   │   └── xgb_model.pkl         # Trained XGBoost model binary
-│   ├── app.py                    # Local Flask API classification engine & test routes
-│   └── train_model.py            # Feature extraction, calibration & model training script
+│   │   ├── rf_model.pkl               # Random Forest (URL model)
+│   │   ├── xgb_model.pkl              # XGBoost (URL model)
+│   │   ├── text_model.pkl             # TF-IDF + Logistic Regression (text model)
+│   │   ├── tld_risk.json              # TLD risk learned from training data
+│   │   └── model_meta.json            # Feature names, classes, threshold info
+│   ├── app.py                         # Local Flask API: /scan, /logs, /allowlist, /settings
+│   ├── features.py                    # Shared URL feature extraction (hostname-based)
+│   ├── threat_rules.py                # Threat-intel lookup, behaviour checks, TLS verification
+│   ├── fetch_threat_intel.py          # Downloads public feeds -> threat_intel.db + public CSV
+│   ├── build_url_dataset.py           # Generates the synthetic Malaysian URL supplement
+│   ├── train_model.py                 # Trains URL + text models from the database
+│   └── test_scan_scenarios.py         # 33 end-to-end safe / medium / high-risk scenarios
 ├── database/
-│   ├── cybersentry.db            # Local SQLite relational database
-│   └── init_db.py                # Database schema & Threat Dictionary seeding script
+│   ├── init_db.py                     # Schema + hand-curated Threat Dictionary
+│   ├── import_datasets.py             # Loads all CSVs into the DB + mines dictionary phrases
+│   ├── cybersentry.db                 # Local SQLite database (generated, not in Git)
+│   └── threat_intel.db                # 5.2M-hostname blocklist (generated, not in Git)
 ├── extension/
-│   ├── manifest.json             # Chrome Extension Manifest V3 configuration
-│   ├── content.js                # DOM text (first 5,000 chars) & URL extraction script
-│   ├── popup.html                # Extension UI (Scanner, Forensic Logs, Allowlist & Settings)
-│   └── popup.js                  # Frontend logic & local engine API communication
-├── .gitignore                    # Excludes venv/ and cache files from Git
-├── requirements.txt              # Python package dependencies
-└── README.md                     # Project documentation
+│   ├── manifest.json                  # Chrome Extension Manifest V3 (activeTab, scripting, downloads)
+│   ├── content.js                     # Page text, URL and behaviour signals (forms, iframes, .exe links)
+│   ├── popup.html                     # Extension UI (Scanner, Forensic Logs, Allowlist & Settings)
+│   └── popup.js                       # Frontend logic, recent-download check & API calls
+├── .gitignore                         # Excludes venv/, caches, generated databases and raw feeds
+├── requirements.txt                   # Python package dependencies
+└── readme.me                          # Project documentation
 ```
 
 ---
@@ -56,7 +69,7 @@ SME-CyberSentry/
 The engine runs **two models**, each trained on the signal it can actually learn, and combines them.
 
 ### 1. URL model: Random Forest + XGBoost ensemble
-17 lexical features taken mainly from the **hostname**, the part of the address an attacker controls (`backend/features.py`):
+20 lexical features taken mainly from the **hostname**, the part of the address an attacker controls (`backend/features.py`). The model classifies a URL as **legit, phishing, gambling or piracy**:
 
 | Feature | What it catches |
 | :--- | :--- |
@@ -68,6 +81,8 @@ The engine runs **two models**, each trained on the signal it can actually learn
 | `Is_URL_Shortener`, `Free_Hosting` | `bit.ly` and similar shorteners, `*.web.app`, `*.weebly.com` and similar free hosts |
 | `Uses_HTTP` | Connection without TLS |
 | `Phishy_Host_Words`, `Suspicious_Path` | `login`, `verify`, `semakan`, `kemaskini`… in the hostname, or `.php` login kits in the path |
+| `Gambling_Host_Words`, `Streaming_Host_Words` | `slot`, `casino`, `bet`, `4d`… or `nonton`, `live`, `stream`, `movie`… in the hostname |
+| `TLD_Risk` | How often each domain ending appeared on malicious sites in the training data (smoothed) |
 | `Hostname_Length`, `Num_Subdomains`, `Hostname_Hyphens`, `Hostname_Digits`, `Host_Entropy` | Structure of the hostname |
 
 > **Why there is no `URL_Length > 75` rule:** legitimate URLs for Gmail, Google Search, Shopee products, and bank portals are often over 75 characters because of paths and tracking parameters. Total URL length is not a reliable phishing signal, so only the hostname is measured.
@@ -101,7 +116,7 @@ The address bar only shows that a page *claims* `https://`. The engine actually 
 ### 5. Evaluation
 | Test | Result |
 | :--- | :--- |
-| URL model, held-out domains (malicious vs legit) | **85.7% accuracy** (gambling F1 0.89, piracy 0.81, phishing 0.74) |
+| URL model, held-out domains (4 classes) | **85.7% accuracy** (legit F1 0.88, gambling 0.89, piracy 0.81, phishing 0.74) |
 | Text model, unseen sentence templates | **97.0% accuracy** |
 | Scenario suite (`python backend/test_scan_scenarios.py`) | **33/33**: 13 safe, 3 medium, 17 high-risk sites |
 | 2,000 unseen legit Tranco domains, URL only | 1.3% Danger |
@@ -128,14 +143,16 @@ The feeds are handled as **text only**; the system never visits the listed sites
 
 ## 🗄️ Database Schema (SQLite)
 
-1. **`THREAT_DICTIONARY`**: Stores localized Bahasa Malaysia & Manglish scam phrases, language types, categories (`Urgency`, `Financial`), and risk weights.
-6. **`TRAINING_DATASET`**: Every row of `train_data.csv`, `test_data.csv`, and `emails_cleaned.csv` (12,400 rows), with label, source file, and split.
-7. **`URL_DATASET`**: About 75,000 labelled URLs (legit / phishing / malware / scam / gambling / piracy) from public feeds, Tranco and the synthetic supplement.
-8. **`threat_intel.db`** *(separate file, rebuilt by `fetch_threat_intel.py`)*: `THREAT_INTEL_DOMAINS` (5.2M hostnames), `POPULAR_DOMAINS` (Tranco top-100k) and `FEED_SOURCES`.
-2. **`FORENSIC_SCAN_LOGS`**: Logs every scanned URL, timestamp, NLP keyword hit count, ML risk score, and final status verdict.
-3. **`EXTRACTED_ML_FEATURES`**: Stores individual lexical feature values linked via Foreign Key (`Log_ID`) to `FORENSIC_SCAN_LOGS`.
-4. **`USER_ALLOWLIST`**: Stores trusted domain names that bypass scanning to save CPU resources.
-5. **`USER_SETTINGS`**: Stores user-configured parameters such as `Risk_Threshold`.
+**`cybersentry.db`**
+1. **`THREAT_DICTIONARY`**: 158 Bahasa Malaysia, Manglish and English phrases with language, category, risk weight, source (manual or mined) and support count. Categories are `Urgency`, `Financial`, `Credential`, `Delivery`, `Reward`, `Impersonation`, `Gambling`, `Illegal Streaming`, `Drive-by Download` and `Fake Alert`.
+2. **`FORENSIC_SCAN_LOGS`**: Logs every scanned URL, timestamp, NLP keyword hit count, risk score and final verdict.
+3. **`EXTRACTED_ML_FEATURES`**: Stores individual feature values linked via Foreign Key (`Log_ID`) to `FORENSIC_SCAN_LOGS`.
+4. **`USER_ALLOWLIST`**: Trusted domain names that bypass scanning to save CPU resources.
+5. **`USER_SETTINGS`**: User-configured parameters such as `Risk_Threshold`.
+6. **`TRAINING_DATASET`**: Every row of `train_data.csv`, `test_data.csv` and `emails_cleaned.csv` (12,400 rows), with label, source file and split.
+7. **`URL_DATASET`**: About 75,000 URLs labelled `legit` or `malicious`, with a category (phishing, malware, scam, gambling or piracy), from public feeds, Tranco and the synthetic supplement.
+
+**`threat_intel.db`** *(separate file, rebuilt by `fetch_threat_intel.py`)*: `THREAT_INTEL_DOMAINS` (5.2M hostnames), `POPULAR_DOMAINS` (Tranco top-100k) and `FEED_SOURCES`.
 
 ---
 
@@ -145,7 +162,7 @@ Follow these steps to set up and run the project on a new machine (PC or Laptop)
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/SME-CyberSentry.git
+git clone https://github.com/Najems21/SME-CyberSentry.git
 cd SME-CyberSentry
 ```
 
@@ -191,14 +208,16 @@ The local engine will start running at `http://127.0.0.1:5000`. Keep this termin
 
 ---
 
-## 🧪 Running Unit Tests & Phishing Simulation
+## 🧪 Testing
 
-With `python backend/app.py` running, you can safely test high-risk detection without visiting live malicious sites by navigating to the built-in academic simulation route in Chrome:
-
-```text
-http://127.0.0.1:5000/test-phishing-simulation-https-login-account-verify-update-portal?redirect=https-verify.account-update.com&user=test@sme.my
+### Automated scenario suite
+```bash
+python backend/test_scan_scenarios.py
 ```
+This runs 33 safe, medium and high-risk scenarios through `/scan`, including Gmail, Maybank2u, LHDN, `jtp-photography.com`, `bintv.cc`, gambling sites, typosquats and fake virus alerts. It uses a temporary copy of the database, so your logs are not touched, and it never connects to a malicious site. Expected result: **33/33 scenarios passed**.
 
-* **Test Safe Browsing:** Visit any legitimate site (e.g., `https://www.google.com` or `https://uitm.edu.my`) and click **Scan Website** $\rightarrow$ Returns **✅ SAFE**.
-* **Test Localized Phishing Detection:** Open the simulation URL above and click **Scan Website** $\rightarrow$ Returns **⚠️ HIGH RISK** with detailed feature analysis and Bahasa Malaysia/Manglish keyword weights.
-* **Test Allowlist Bypass:** Click **+ Allowlist** on any domain and scan again $\rightarrow$ Immediately bypasses ML inference and returns **✅ SAFE (0%)**.
+### Manual tests in Chrome (safe to visit)
+* **Safe browsing:** Visit `https://www.google.com` or `https://uitm.edu.my` and click **Scan Website** $\rightarrow$ **✅ SAFE**.
+* **Certificate checks:** `https://expired.badssl.com/`, `https://self-signed.badssl.com/` and `https://wrong.host.badssl.com/` are public test pages with broken certificates $\rightarrow$ **⚠️ HIGH RISK** (*Invalid certificate*).
+* **Scam content on an official site:** Open a Malay scam email in Gmail $\rightarrow$ **⚡ MEDIUM RISK** with the matched Bahasa Malaysia / Manglish phrases listed.
+* **Allowlist bypass:** Click **+ Allowlist** on any domain and scan again $\rightarrow$ skips the engine and returns **✅ SAFE (0%)**.
