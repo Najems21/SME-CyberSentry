@@ -1,0 +1,46 @@
+{
+  "trained_at": "2026-11-19T11:35:28",
+  "url_features": [
+    "Hostname_Length",
+    "Num_Subdomains",
+    "Hostname_Hyphens",
+    "Hostname_Digits",
+    "Is_IP_Host",
+    "Has_At_Symbol",
+    "Uses_HTTP",
+    "Suspicious_TLD",
+    "Is_URL_Shortener",
+    "Free_Hosting",
+    "Brand_Impersonation",
+    "Brand_Lookalike",
+    "Phishy_Host_Words",
+    "Is_Punycode",
+    "Host_Entropy",
+    "Brand_In_Path",
+    "Suspicious_Path"
+  ],
+  "url_training_rows": 6000,
+  "text_training_sentences": 2524,
+  "metrics": {
+    "url_rf": {
+      "accuracy": 0.9969,
+      "f1": 0.9972
+    },
+    "url_xgb": {
+      "accuracy": 0.9969,
+      "f1": 0.9972
+    },
+    "url_ensemble": {
+      "accuracy": 0.9958,
+      "f1": 0.9963
+    },
+    "text_test_csv": {
+      "accuracy": 1.0,
+      "f1": 1.0
+    },
+    "text_unseen_templates": {
+      "accuracy": 0.9703,
+      "f1": 0.9754
+    }
+  }
+}

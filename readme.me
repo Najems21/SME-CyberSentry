@@ -51,28 +51,42 @@ SME-CyberSentry/
 
 ---
 
-## 🧠 Extracted Features (ML & NLP Pipeline)
+## 🧠 Detection Engine (ML & NLP Pipeline)
 
-The hybrid classification engine extracts 6 core features from every scanned webpage:
+The engine runs **two models**, each trained on the signal it can actually learn, and combines them.
 
-| Feature Name | Type | Description |
-| :--- | :--- | :--- |
-| `URL_Length` | Integer | Total character length of the domain and path (flags abnormally long URLs $>75$ chars). |
-| `NumDots` | Integer | Count of periods (`.`) in the hostname to detect deceptive multi-level subdomains. |
-| `NumDash` | Integer | Count of hyphens (`-`) in the hostname used to mimic legitimate brands (e.g., `maybank-update.com`). |
-| `NumSpecialChars` | Integer | Count of obfuscation/redirect characters (`@`, `%`, multiple `?`). |
-| `HttpsInHostname` | Binary ($0/1$) | Detects deceptive placement of `"https"` inside the domain name or insecure `http://` usage. |
-| `NLP_Threat_Keywords` | Integer | Frequency of localized Bahasa Malaysia and Manglish threat phrases matched against `THREAT_DICTIONARY`. |
+### 1. URL model: Random Forest + XGBoost ensemble
+17 lexical features taken mainly from the **hostname**, the part of the address an attacker controls (`backend/features.py`):
 
-The final probability score is computed via an ensemble average of the Random Forest and XGBoost classifiers combined with localized NLP risk weights:
+| Feature | What it catches |
+| :--- | :--- |
+| `Suspicious_TLD` | High-risk endings such as `.top`, `.xyz`, `.tk`, `.click` |
+| `Brand_Impersonation` | Brand name on a domain the brand doesn't own (`maybank2u-secure-login.com`) |
+| `Brand_Lookalike` | Typosquats and homoglyphs (`rnaybank2u.com`, `g00gle.com`) |
+| `Brand_In_Path` | `/maybank/login.php` hosted on an unrelated or hacked site |
+| `Is_IP_Host`, `Has_At_Symbol`, `Is_Punycode` | Raw-IP hosts, `real.com@evil.top` tricks, homograph domains |
+| `Is_URL_Shortener`, `Free_Hosting` | `bit.ly` and similar shorteners, `*.web.app`, `*.weebly.com` and similar free hosts |
+| `Uses_HTTP` | Connection without TLS |
+| `Phishy_Host_Words`, `Suspicious_Path` | `login`, `verify`, `semakan`, `kemaskini`… in the hostname, or `.php` login kits in the path |
+| `Hostname_Length`, `Num_Subdomains`, `Hostname_Hyphens`, `Hostname_Digits`, `Host_Entropy` | Structure of the hostname |
 
-$$\text{ML\_Score} = \frac{P_{\text{RF}}(\text{Phishing}) + P_{\text{XGB}}(\text{Phishing})}{2}$$
+> **Why there is no `URL_Length > 75` rule:** legitimate URLs for Gmail, Google Search, Shopee products, and bank portals are often over 75 characters because of paths and tracking parameters. Total URL length is not a reliable phishing signal, so only the hostname is measured.
+
+### 2. Text model: TF-IDF + Logistic Regression and the Threat Dictionary
+* The page text is split into sentences. Each sentence that uses enough known Malay vocabulary is scored by the text model.
+* Phrases in `THREAT_DICTIONARY` (Bahasa Malaysia, Manglish, English) are combined with a noisy-OR rule, so several phrases strengthen each other while a single phrase stays moderate.
+
+### 3. Fusion
+* `Risk = max(URL score, Content score)`. Add +10 when both are ≥ 50%.
+* **Official domains** (e.g. `google.com`, `maybank2u.com.my`, `*.gov.my`) never get a *Danger* verdict from the URL. If the page *shows* scam text, such as a phishing email open in Gmail, the result is capped at **Medium Risk** with a warning.
 
 ---
 
 ## 🗄️ Database Schema (SQLite)
 
 1. **`THREAT_DICTIONARY`**: Stores localized Bahasa Malaysia & Manglish scam phrases, language types, categories (`Urgency`, `Financial`), and risk weights.
+6. **`TRAINING_DATASET`**: Every row of `train_data.csv`, `test_data.csv`, and `emails_cleaned.csv` (12,400 rows), with label, source file, and split.
+7. **`URL_DATASET`**: 6,000 labelled URLs for the URL model (`url_dataset.csv`).
 2. **`FORENSIC_SCAN_LOGS`**: Logs every scanned URL, timestamp, NLP keyword hit count, ML risk score, and final status verdict.
 3. **`EXTRACTED_ML_FEATURES`**: Stores individual lexical feature values linked via Foreign Key (`Log_ID`) to `FORENSIC_SCAN_LOGS`.
 4. **`USER_ALLOWLIST`**: Stores trusted domain names that bypass scanning to save CPU resources.
@@ -105,14 +119,16 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Initialize the SQLite Database & Threat Dictionary
+### 4. Initialize the SQLite Database & Import the Datasets
 ```bash
-python database/init_db.py
+python database/init_db.py            # schema + hand-curated Threat Dictionary
+python backend/build_url_dataset.py   # (re)generates dataset/url_dataset.csv
+python database/import_datasets.py    # loads ALL CSVs into the DB + mines dictionary phrases
 ```
 
-### 5. Train the Calibrated ML Models (Optional if `.pkl` files are already present)
+### 5. Train the Models (Optional if `.pkl` files are already present)
 ```bash
-python backend/train_model.py
+python backend/train_model.py         # trains from the database; prints evaluation report
 ```
 
 ### 6. Start the Local Classification Engine

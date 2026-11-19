@@ -61,6 +61,12 @@ document.getElementById('scanBtn').addEventListener('click', async () => {
     });
 });
 
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 function renderScanResult(data) {
     const resultDiv = document.getElementById('result');
     resultDiv.style.display = "block";
@@ -73,21 +79,40 @@ function renderScanResult(data) {
     }
 
     const f = data.features || {};
-    const suspiciousLen = (f.URL_Length || 0) > 75 ? '<span style="color:#d32f2f">Yes (' + f.URL_Length + ')</span>' : '<span>No (' + (f.URL_Length || 0) + ')</span>';
-    const httpsMismatch = f.HttpsInHostname ? '<span style="color:#d32f2f">Yes</span>' : '<span>No</span>';
+    const red = (txt) => `<span style="color:#d32f2f">${txt}</span>`;
+    const scoreSpan = (v) => (v || 0) >= 50 ? red((v || 0) + '%') : `<span>${v || 0}%</span>`;
+    const domainLabel = escapeHtml(data.registered_domain || data.domain || '-') +
+        (data.trusted_domain ? ' <span style="color:#2e7d32">✔ Official</span>' : '');
+    const httpsState = f.Uses_HTTP ? red('No (HTTP)') : '<span>Yes</span>';
+
+    let flagsHtml = "";
+    if (!data.allowlisted) {
+        const flags = data.url_flags || [];
+        flagsHtml = flags.length
+            ? flags.map(fl => `<div class="kw-item"><span>⚠ ${escapeHtml(fl)}</span></div>`).join('')
+            : `<p style="font-size:11px; color:#64748b; margin:0 0 6px;">No suspicious URL signals.</p>`;
+    }
 
     let kwHtml = "";
     if (data.allowlisted) {
-        kwHtml = `<p style="font-size:11px; color:#2e7d32; margin:0;">Domain <b>${data.domain}</b> is in your Trusted Allowlist. Scan bypassed to save CPU.</p>`;
-    } else if (data.detected_keywords && data.detected_keywords.length > 0) {
-        kwHtml = data.detected_keywords.map(k => `
+        kwHtml = `<p style="font-size:11px; color:#2e7d32; margin:0;">Domain <b>${escapeHtml(data.domain)}</b> is in your Trusted Allowlist. Scan bypassed to save CPU.</p>`;
+    } else {
+        const kws = data.detected_keywords || [];
+        const sents = data.suspicious_sentences || [];
+        kwHtml = kws.map(k => `
             <div class="kw-item">
-                <span>"${k.keyword}"</span>
+                <span>"${escapeHtml(k.keyword)}"</span>
                 <span class="kw-weight">+${k.weight}</span>
             </div>
+        `).join('') + sents.map(s => `
+            <div class="kw-item">
+                <span title="${escapeHtml(s.sentence)}">${escapeHtml(s.sentence.length > 70 ? s.sentence.substring(0, 67) + '...' : s.sentence)}</span>
+                <span class="kw-weight">${s.probability}%</span>
+            </div>
         `).join('');
-    } else {
-        kwHtml = `<p style="font-size:11px; color:#64748b; margin:0;">No Bahasa Malaysia or Manglish scam phrases detected.</p>`;
+        if (!kwHtml) {
+            kwHtml = `<p style="font-size:11px; color:#64748b; margin:0;">No Bahasa Malaysia or Manglish scam phrases detected.</p>`;
+        }
     }
 
     resultDiv.innerHTML = `
@@ -99,11 +124,13 @@ function renderScanResult(data) {
 
             <div class="section-title">🔍 Feature Analysis</div>
             <div class="feature-grid">
-                <div class="feature-box">URL Length > 75 ${suspiciousLen}</div>
-                <div class="feature-box">Subdomain Dots <span>${f.NumDots || 0}</span></div>
-                <div class="feature-box">Hyphens / Dashes <span>${f.NumDash || 0}</span></div>
-                <div class="feature-box">HTTPS Anomaly ${httpsMismatch}</div>
+                <div class="feature-box">Domain <span>${domainLabel}</span></div>
+                <div class="feature-box">Secure (HTTPS) ${httpsState}</div>
+                <div class="feature-box">URL Model Risk ${scoreSpan(data.url_score)}</div>
+                <div class="feature-box">Content Risk ${scoreSpan(data.text_score)}</div>
             </div>
+            ${flagsHtml}
+            ${data.note ? `<p style="font-size:11px; color:#ed6c02; margin:0 0 6px;">ℹ ${escapeHtml(data.note)}</p>` : ''}
 
             <div class="section-title">🗣️ Localized NLP Detection</div>
             ${kwHtml}
