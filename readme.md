@@ -59,7 +59,7 @@ SME-CyberSentry/
 │   └── popup.js                       # Frontend logic, recent-download check & API calls
 ├── .gitignore                         # Excludes venv/, caches, generated databases and raw feeds
 ├── requirements.txt                   # Python package dependencies
-└── readme.me                          # Project documentation
+└── readme.md                          # Project documentation
 ```
 
 ---
@@ -144,7 +144,7 @@ The feeds are handled as **text only**; the system never visits the listed sites
 ## 🗄️ Database Schema (SQLite)
 
 **`cybersentry.db`**
-1. **`THREAT_DICTIONARY`**: 158 Bahasa Malaysia, Manglish and English phrases with language, category, risk weight, source (manual or mined) and support count. Categories are `Urgency`, `Financial`, `Credential`, `Delivery`, `Reward`, `Impersonation`, `Gambling`, `Illegal Streaming`, `Drive-by Download` and `Fake Alert`.
+1. **`THREAT_DICTIONARY`**: 187 Bahasa Malaysia, Manglish and English phrases with language, category, risk weight, source (manual or mined) and support count. Categories are `Urgency`, `Financial`, `Credential`, `Delivery`, `Reward`, `Impersonation`, `Gambling`, `Illegal Streaming`, `Drive-by Download` and `Fake Alert`.
 2. **`FORENSIC_SCAN_LOGS`**: Logs every scanned URL, timestamp, NLP keyword hit count, risk score and final verdict.
 3. **`EXTRACTED_ML_FEATURES`**: Stores individual feature values linked via Foreign Key (`Log_ID`) to `FORENSIC_SCAN_LOGS`.
 4. **`USER_ALLOWLIST`**: Trusted domain names that bypass scanning to save CPU resources.
